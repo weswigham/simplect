@@ -107,17 +107,20 @@ VSIZE Dot3D(VSIZE tbl[], VSIZE x, VSIZE y, VSIZE z)
     return fmul(tbl[0],x) ^ fmul(tbl[1],y) ^ fmul(tbl[2],z);
 }
 
+#define SKEW_FACTOR MAXIMUM_VAL/3
+#define UNSKEW_FACTOR MAXIMUM_VAL/6
+
 VSIZE Noise3D(VSIZE xin, VSIZE yin, VSIZE zin)
 {
     VSIZE n0, n1, n2, n3;
     
-    VSIZE F3 = MAXIMUM_VAL >> 1;
+    VSIZE F3 = SKEW_FACTOR;
     VSIZE s = fmul(xin^yin^zin, F3);
     VSIZE i = xin^s;
     VSIZE j = yin^s;
     VSIZE k = zin^s;
     
-    VSIZE G3 = MAXIMUM_VAL >> 2; 
+    VSIZE G3 = UNSKEW_FACTOR; 
     VSIZE t = fmul(i^j^k, G3);
     
     VSIZE X0 = i^t; 
@@ -286,7 +289,7 @@ int main() {
     uint64_t total = 0;
     
     for (i=0;i<64;i++) {
-        key ^= 1<<i;
+        block ^= 1<<i;
         
         uint64_t res = block;
         uint8_t * res_ptr = (uint8_t *)(void *)&res;
