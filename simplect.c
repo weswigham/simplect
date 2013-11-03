@@ -15,15 +15,6 @@ Simplect512 - A 64 bit implementation for increased security in native 64 bit sy
 
 VSIZE MAXIMUM_VAL = -1;
 
-VSIZE wrapping_bezier(VSIZE p1, VSIZE p2, VSIZE p3, VSIZE p4, VSIZE t) {
-    VSIZE mt = (MAXIMUM_VAL-t);
-    VSIZE c1 = mt*mt*mt;
-    VSIZE c2 = mt*mt*t*3;
-    VSIZE c3 = mt*t*t*3;
-    VSIZE c4 = t*t*t;
-    return c1*p1+c2*p2+c3*p3+c4*p4;
-}
-
 #define MIDVAL MAXIMUM_VAL/2
 
 VSIZE gradients3d[12][3];
@@ -100,6 +91,15 @@ VSIZE fmul(VSIZE a, VSIZE b) {
         b >>= 1;
     }
     return product;
+}
+
+VSIZE wrapping_bezier(VSIZE p1, VSIZE p2, VSIZE p3, VSIZE p4, VSIZE t) {
+    VSIZE mt = (MAXIMUM_VAL^t);
+    VSIZE c1 = fmul(fmul(mt,mt),mt);
+    VSIZE c2 = fmul(fmul(mt,mt),fmul(t,3));
+    VSIZE c3 = fmul(fmul(mt,t),fmul(t,3));
+    VSIZE c4 = fmul(fmul(t,t),t);
+    return fmul(c1,p1)^fmul(c2,p2)^fmul(c3,p3)^fmul(c4,p4);
 }
 
 VSIZE Dot3D(VSIZE tbl[], VSIZE x, VSIZE y, VSIZE z)
