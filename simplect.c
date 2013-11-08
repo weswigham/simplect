@@ -23,7 +23,7 @@ int pg3d[12][3] = {{1,1,0},{-1,1,0},{1,-1,0},{-1,-1,0},
 {1,0,1},{-1,0,1},{1,0,-1},{-1,0,-1},
 {0,1,1},{0,-1,1},{0,1,-1},{0,-1,-1}};
                         
-int p[256] = {151,160,137,91,90,15,
+int perm[256] = {151,160,137,91,90,15,
 131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
 190, 6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,
 88,237,149,56,87,174,20,125,136,171,168, 68,175,74,165,71,134,139,48,27,166,
@@ -37,8 +37,6 @@ int p[256] = {151,160,137,91,90,15,
 49,192,214, 31,181,199,106,157,184, 84,204,176,115,121,50,45,127, 4,150,254,
 138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180};
 
-int perm[512];
-
 static void con() __attribute__((constructor));
 
 /*
@@ -51,12 +49,6 @@ And so we'll use this as the polynomial for our finite field.
 VSIZE poly = 0;
 
 void con() {
-    int i = 0;
-    for (i = 0 ; i < 255 ; i++) {
-        perm[i] = p[i];
-        perm[i+256] = p[i];
-    }
-    
     int j, k;
     for (j=0; j<12; j++) {
         for (k=0; k<3; k++) {
@@ -70,8 +62,8 @@ void con() {
         }
     }
     
-    for (i=1;i<(sizeof(VSIZE)*8);i+=2) {
-        poly |= (1<<i);
+    for (j=1;j<(sizeof(VSIZE)*8);j+=2) {
+        poly |= (1<<j);
     }
     poly |= 1;
 }
@@ -93,6 +85,23 @@ VSIZE fmul(VSIZE a, VSIZE b) {
     return product;
 }
 
+//Modular inverse, extended euclidean algorithm
+VSIZE invert_mod(VSIZE a, VSIZE p) {
+    VSIZE new = 1, old = 0, q = p, r, h;
+    VSIZE pos = 0;
+    while (a > 0) {
+        r = q%a;
+        q = q/a;
+        h = q*new + old;
+        old = new;
+        new = h;
+        q = a;
+        a = r;
+        pos = !pos;
+    }
+    return pos ? old : (p - old);
+}
+
 VSIZE wrapping_bezier(VSIZE p1, VSIZE p2, VSIZE p3, VSIZE p4, VSIZE t) {
     VSIZE mt = (MAXIMUM_VAL^t);
     VSIZE c1 = fmul(fmul(mt,mt),mt);
@@ -107,8 +116,10 @@ VSIZE Dot3D(VSIZE tbl[], VSIZE x, VSIZE y, VSIZE z)
     return fmul(tbl[0],x) ^ fmul(tbl[1],y) ^ fmul(tbl[2],z);
 }
 
-#define SKEW_FACTOR MAXIMUM_VAL/3
-#define UNSKEW_FACTOR MAXIMUM_VAL/6
+#define SKEW_FACTOR fmul(MAXIMUM_VAL, invert_mod(3, poly))
+#define UNSKEW_FACTOR fmul(MAXIMUM_VAL, invert_mod(6, poly))
+
+#include <stdio.h>
 
 VSIZE Noise3D(VSIZE xin, VSIZE yin, VSIZE zin)
 {
@@ -136,24 +147,24 @@ VSIZE Noise3D(VSIZE xin, VSIZE yin, VSIZE zin)
     
     if (x0>=y0){
         if (y0>=z0){
-            i1=MAXIMUM_VAL; j1=0; k1=0; i2=MAXIMUM_VAL; j2=MAXIMUM_VAL; k2=0; // X Y Z order
+            i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; // X Y Z order
         }
         else if (x0>=z0){
-            i1=MAXIMUM_VAL; j1=0; k1=0; i2=MAXIMUM_VAL; j2=0; k2=MAXIMUM_VAL; // X Z Y order
+            i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; // X Z Y order
         }
         else{
-            i1=0; j1=0; k1=MAXIMUM_VAL; i2=MAXIMUM_VAL; j2=0; k2=MAXIMUM_VAL;  // Z X Y order
+            i1=0; j1=0; k1=1; i2=1; j2=0; k2=1;  // Z X Y order
         }
     }
     else{ // x0<y0
         if (y0<z0){
-            i1=0; j1=0; k1=MAXIMUM_VAL; i2=0; j2=MAXIMUM_VAL; k2=MAXIMUM_VAL; // Z Y X order
+            i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; // Z Y X order
         }
         else if (x0<z0){
-            i1=0; j1=MAXIMUM_VAL; k1=0; i2=0; j2=MAXIMUM_VAL; k2=MAXIMUM_VAL; // Y Z X order
+            i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; // Y Z X order
         }
         else{ 
-            i1=0; j1=MAXIMUM_VAL; k1=0; i2=MAXIMUM_VAL; j2=MAXIMUM_VAL; k2=0; // Y X Z order
+            i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; // Y X Z order
         }
     }
     
@@ -175,10 +186,10 @@ VSIZE Noise3D(VSIZE xin, VSIZE yin, VSIZE zin)
     VSIZE kk = k & 255;
     
     
-    VSIZE gi0 = perm[(ii^perm[(jj^perm[kk]) % 256]) %256] % 12;
-    VSIZE gi1 = perm[(ii^i1^perm[(jj^j1^perm[(kk^k1) % 256]) % 256]) % 256] % 12;
-    VSIZE gi2 = perm[(ii^i2^perm[(jj^j2^perm[(kk^k2) % 256]) % 256]) % 256] % 12;
-    VSIZE gi3 = perm[(ii^1^perm[(jj^1^perm[(kk^1) % 256]) % 256]) % 256] % 12;
+    VSIZE gi0 = perm[ii^perm[jj^perm[kk]]] % 12;
+    VSIZE gi1 = perm[ii^i1^perm[jj^j1^perm[kk^k1]]] % 12;
+    VSIZE gi2 = perm[ii^i2^perm[jj^j2^perm[kk^k2]]] % 12;
+    VSIZE gi3 = perm[ii^1^perm[jj^1^perm[kk^1]]] % 12;
     
     VSIZE t0 = (MIDVAL) ^ fmul(x0,x0) ^ fmul(y0,y0) ^ fmul(z0,z0);
     
@@ -205,37 +216,85 @@ VSIZE Noise3D(VSIZE xin, VSIZE yin, VSIZE zin)
     return retval;
 }
 
-#define RLEFT(v, n) ((v << n) | (v >> ((sizeof(VSIZE)<<3) - n)))
+void circular_left(uint8_t * blocks, int size, int i) { //Note: Only shifts correctly when i<8
+    int max = size;
+    uint8_t original = blocks[max-1];
+    while(size--) {
+        if ((size-1) % max == (max-1)) {
+            blocks[size] = (blocks[size] << i) | (original >> (8 - i));
+        } else {
+            blocks[size] = (blocks[size] << i) | (blocks[(size-1) % max] >> (8 - i));
+        }
+        if (size==0) return;
+    }
+}
 
 void encode_block(uint8_t * key, uint8_t * block) {
+
+    /*
+    The curve. Our internal curve is a bezier curve arranged 
+    in a square, with the first point being in the upper left,
+    3rd in the lower left, and last in the upper right.
+    
+    The key transforms this curve. The following parameters are applied:
+    top pair x-direction stretch/shrink
+    bottom pair x-direction stretch/shrink
+    left pair y-direction stretch/shrink
+    right pair y-direction stretch/shrink
+    */
+    
     VSIZE * key_blocks = (VSIZE *)(void *)key;
     
-    long int c = 0;
+    int c = 0;
+    
     for (c=0; c<BLOCKSIZE; c++) {
-        int d = 0;
-        for (d=0; d<8; d++) {
-            //Bezier to find x coordinates
-            
-            VSIZE frac = (MAXIMUM_VAL/(BLOCKSIZE*8));
-            
-            VSIZE x = wrapping_bezier( key_blocks[0],
-                            key_blocks[2],
-                            key_blocks[4],
-                            key_blocks[6],
-                            frac*c + ((d+1)/(8)*frac) );
-            //Bezier to find y coordinates
-            VSIZE y = wrapping_bezier( key_blocks[1],
-                            key_blocks[3],
-                            key_blocks[5],
-                            key_blocks[7],
-                            frac*c + ((d+1)/(8)*frac) );
-            VSIZE value = Noise3D(x, y, d^c); //Find the noise value
-            if (value>(MIDVAL)) {
-                block[c] ^= (1<<d);
-            }
-        }
-        block[c] ^= RLEFT(key[c], c);
-        key[(c+1) % KEYSIZE] ^= block[c];
+    
+        VSIZE points[8] = {
+            1*MAXIMUM_VAL/8, 7*MAXIMUM_VAL/8, //top left
+            7*MAXIMUM_VAL/8, 7*MAXIMUM_VAL/8,  //top right
+            7*MAXIMUM_VAL/8, 1*MAXIMUM_VAL/8, //lower right 
+            1*MAXIMUM_VAL/8, 1*MAXIMUM_VAL/8,  //lower left
+        };
+        
+        points[0] ^= key_blocks[0]%(MAXIMUM_VAL/4); 
+        points[2] ^= key_blocks[0]%(MAXIMUM_VAL/4); 
+        points[4] ^= key_blocks[1]%(MAXIMUM_VAL/4); 
+        points[6] ^= key_blocks[1]%(MAXIMUM_VAL/4); 
+        points[1] ^= key_blocks[2]%(MAXIMUM_VAL/4); 
+        points[3] ^= key_blocks[2]%(MAXIMUM_VAL/4); 
+        points[5] ^= key_blocks[3]%(MAXIMUM_VAL/4); 
+        points[7] ^= key_blocks[3]%(MAXIMUM_VAL/4); 
+        
+        VSIZE scale = key_blocks[4]%(MAXIMUM_VAL/4) ^ 
+                    key_blocks[5]%(MAXIMUM_VAL/4) ^ 
+                    key_blocks[6]%(MAXIMUM_VAL/4) ^
+                    key_blocks[7]%(MAXIMUM_VAL/4);
+        
+        int k = 0;
+        for (k=0;k<8;k++) {
+            points[k] ^= scale;
+        }       
+                    
+        
+        circular_left(key, KEYSIZE, 2);
+    
+        //Bezier to find x coordinates
+        
+        VSIZE frac = (MAXIMUM_VAL/(BLOCKSIZE*8));
+        
+        VSIZE x = wrapping_bezier( points[0],
+                        points[2],
+                        points[4],
+                        points[6],
+                        frac*c);
+        //Bezier to find y coordinates
+        VSIZE y = wrapping_bezier( points[1],
+                        points[3],
+                        points[5],
+                        points[7],
+                        frac*c );
+                        
+        block[c] ^= Noise3D(x, y, (MAXIMUM_VAL*c)/8 ); //Find the noise value
     }
 }
 
@@ -255,17 +314,15 @@ uint64_t tests[] = {
 };
 #define NUM_TESTS (12)
 
-#include <stdio.h>
-
 int main() {
     
     uint32_t i = 0;
     for (i=0;i<NUM_TESTS;i++) {
     
-        printf("Using key %016lX, encoding the zero-string!\n", tests[i]);
-    
         uint64_t key = tests[i];
         uint8_t * key_ptr = (uint8_t *)(void *)&key;
+        
+        printf("Using key %016lX, encoding the zero-string!\n", key);
         
         uint64_t block = 0;
         uint8_t * block_ptr = (uint8_t *)(void *)&block;
@@ -273,6 +330,12 @@ int main() {
         encode_block(key_ptr, block_ptr);
         
         printf("Block result: %016lX\n" ,block);
+        
+        //Key was mutated by encoding, get it back.
+        key = tests[i];
+        key_ptr = (uint8_t *)(void *)&key;
+        
+        printf("Using key %016lX, decoding the zero-string!\n", key);
         
         encode_block(key_ptr, block_ptr);
         
@@ -289,6 +352,10 @@ int main() {
     uint64_t total = 0;
     
     for (i=0;i<64;i++) {
+        //Key was mutated by encoding, get it back, since we only want to varry the block
+        key = 0;
+        key_ptr = (uint8_t *)(void *)&key;
+        
         block ^= 1<<i;
         
         uint64_t res = block;
