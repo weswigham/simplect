@@ -231,71 +231,103 @@ void circular_left(uint8_t * blocks, int size, int i) { //Note: Only shifts corr
     }
 }
 
-void encode_block(uint8_t * key, uint8_t * block) {
-    /*
-    The curve. Our internal curve is a bezier curve arranged 
-    in a square, with the first point being in the upper left,
-    3rd in the lower left, and last in the upper right.
+VSIZE feistel(int round, VSIZE input, VSIZE * key) { //key is 8 elements long; always.
+    VSIZE points[8] = {
+        1*MAXIMUM_VAL/8, 7*MAXIMUM_VAL/8, //top left
+        7*MAXIMUM_VAL/8, 7*MAXIMUM_VAL/8,  //top right
+        7*MAXIMUM_VAL/8, 1*MAXIMUM_VAL/8, //lower right 
+        1*MAXIMUM_VAL/8, 1*MAXIMUM_VAL/8,  //lower left
+    };
     
-    The key transforms this curve. The following parameters are applied:
-    top pair x-direction stretch/shrink
-    bottom pair x-direction stretch/shrink
-    left pair y-direction stretch/shrink
-    right pair y-direction stretch/shrink
-    */
+    points[0] ^= key[0]%(MAXIMUM_VAL/4); 
+    points[2] ^= key[0]%(MAXIMUM_VAL/4); 
+    points[4] ^= key[1]%(MAXIMUM_VAL/4); 
+    points[6] ^= key[1]%(MAXIMUM_VAL/4); 
+    points[1] ^= key[2]%(MAXIMUM_VAL/4); 
+    points[3] ^= key[2]%(MAXIMUM_VAL/4); 
+    points[5] ^= key[3]%(MAXIMUM_VAL/4); 
+    points[7] ^= key[3]%(MAXIMUM_VAL/4); 
     
-    VSIZE * key_blocks = (VSIZE *)(void *)key;
-
-    int c=0;
+    VSIZE scale = key[4]%(MAXIMUM_VAL/4) ^ 
+                key[5]%(MAXIMUM_VAL/4) ^ 
+                key[6]%(MAXIMUM_VAL/4) ^
+                key[7]%(MAXIMUM_VAL/4);
     
-    for (c=0; c<BLOCKSIZE; c++) {
-    
-        VSIZE points[8] = {
-            1*MAXIMUM_VAL/8, 7*MAXIMUM_VAL/8, //top left
-            7*MAXIMUM_VAL/8, 7*MAXIMUM_VAL/8,  //top right
-            7*MAXIMUM_VAL/8, 1*MAXIMUM_VAL/8, //lower right 
-            1*MAXIMUM_VAL/8, 1*MAXIMUM_VAL/8,  //lower left
-        };
-        
-        points[0] ^= key_blocks[0]%(MAXIMUM_VAL/4); 
-        points[2] ^= key_blocks[0]%(MAXIMUM_VAL/4); 
-        points[4] ^= key_blocks[1]%(MAXIMUM_VAL/4); 
-        points[6] ^= key_blocks[1]%(MAXIMUM_VAL/4); 
-        points[1] ^= key_blocks[2]%(MAXIMUM_VAL/4); 
-        points[3] ^= key_blocks[2]%(MAXIMUM_VAL/4); 
-        points[5] ^= key_blocks[3]%(MAXIMUM_VAL/4); 
-        points[7] ^= key_blocks[3]%(MAXIMUM_VAL/4); 
-        
-        VSIZE scale = key_blocks[4]%(MAXIMUM_VAL/4) ^ 
-                    key_blocks[5]%(MAXIMUM_VAL/4) ^ 
-                    key_blocks[6]%(MAXIMUM_VAL/4) ^
-                    key_blocks[7]%(MAXIMUM_VAL/4);
-        
-        int k = 0;
-        for (k=0;k<8;k++) {
-            points[k] ^= scale;
-        }
-    
-        //Bezier to find x coordinates
-        
-        VSIZE frac = (MAXIMUM_VAL/(BLOCKSIZE*8));
-        
-        VSIZE x = wrapping_bezier( points[0],
-                        points[2],
-                        points[4],
-                        points[6],
-                        frac*c);
-        //Bezier to find y coordinates
-        VSIZE y = wrapping_bezier( points[1],
-                        points[3],
-                        points[5],
-                        points[7],
-                        frac*c);
-        
-        VSIZE contrib = Noise3D(x, y, (MAXIMUM_VAL*c)/8 ); //Find the noise value        
-        block[c] ^= contrib;
+    int k = 0;
+    for (k=0;k<8;k++) {
+        points[k] ^= scale;
     }
 
+    //Bezier to find x coordinates
+    
+    VSIZE frac = (MAXIMUM_VAL/(BLOCKSIZE*8));
+    
+    VSIZE x = wrapping_bezier( points[0],
+                    points[2],
+                    points[4],
+                    points[6],
+                    frac*round);
+    //Bezier to find y coordinates
+    VSIZE y = wrapping_bezier( points[1],
+                    points[3],
+                    points[5],
+                    points[7],
+                    frac*round);
+    
+    return Noise3D(x, y, input); //Find the noise value        
+}
+
+int rounds = 8;
+
+void encode_block(uint8_t * key, uint8_t * block) {
+    
+    VSIZE * key_blocks = (VSIZE *)(void *)key;
+    VSIZE * message = (VSIZE *)(void *)block;
+
+    int r = 0;
+    for (r=0; r<rounds; r++) {
+        
+        VSIZE first = message[0];
+        
+        VSIZE tmp = message[1];
+        message[1] = message[0]; message[0] = tmp^feistel(r, message[2], key_blocks);
+        
+        tmp = message[3];
+        message[3] = message[2]; message[2] = tmp^feistel(r, message[4], key_blocks);
+        
+        tmp = message[5];
+        message[5] = message[4]; message[4] = tmp^feistel(r, message[6], key_blocks);
+        
+        tmp = message[7];
+        message[7] = message[6]; message[6] = tmp^feistel(r, first, key_blocks);
+    }
+}
+
+void decode_block(uint8_t * key, uint8_t * block) {
+    
+    VSIZE * key_blocks = (VSIZE *)(void *)key;
+    VSIZE * message = (VSIZE *)(void *)block;
+
+    int r = rounds-1;
+    for (; r>=0; r--) {
+    
+        VSIZE first = message[0];
+        
+        VSIZE prev = message[7];
+        message[7] = message[6]^feistel(r, message[1], key_blocks);
+        message[0] = message[1];
+        
+        VSIZE prev2 = message[5];
+        message[5] = message[4]^feistel(r, prev, key_blocks);
+        message[6] = prev;
+        
+        prev = message[3];
+        message[3] = message[2]^feistel(r, prev2, key_blocks);
+        message[4] = prev2;
+        
+        message[1] = first^feistel(r, prev, key_blocks);
+        message[2] = prev;
+    }
 }
 
 
@@ -338,7 +370,7 @@ int main() {
         
         printf("Using key %016lX, decoding the zero-string!\n", key);
         
-        encode_block(key_ptr, block_ptr);
+        decode_block(key_ptr, block_ptr);
         
         printf("Reversing it: %016lX\n" ,block);
     
@@ -356,9 +388,7 @@ int main() {
         //Key was mutated by encoding, get it back, since we only want to varry the block
         key = 0;
         key_ptr = (uint8_t *)(void *)&key;
-        
-        block = (block<<1 | block);
-        
+                
         uint64_t res = block;
         uint8_t * res_ptr = (uint8_t *)(void *)&res;
         
@@ -375,6 +405,8 @@ int main() {
         
         printf("%d: %016lX -> %016lX differs in %d bits\n", i, block, res, count);
         total += count;
+        
+        block = (block<<1 | block);
         
     }
 
