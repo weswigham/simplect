@@ -216,6 +216,8 @@ VSIZE Noise3D(VSIZE xin, VSIZE yin, VSIZE zin)
     return retval;
 }
 
+#define RLEFT(v, n) ((v << n) | (v >> ((sizeof(VSIZE)<<3) - n)))
+
 void circular_left(uint8_t * blocks, int size, int i) { //Note: Only shifts correctly when i<8
     int max = size;
     uint8_t original = blocks[max-1];
@@ -230,7 +232,6 @@ void circular_left(uint8_t * blocks, int size, int i) { //Note: Only shifts corr
 }
 
 void encode_block(uint8_t * key, uint8_t * block) {
-
     /*
     The curve. Our internal curve is a bezier curve arranged 
     in a square, with the first point being in the upper left,
@@ -244,8 +245,8 @@ void encode_block(uint8_t * key, uint8_t * block) {
     */
     
     VSIZE * key_blocks = (VSIZE *)(void *)key;
-    
-    int c = 0;
+
+    int c=0;
     
     for (c=0; c<BLOCKSIZE; c++) {
     
@@ -273,10 +274,7 @@ void encode_block(uint8_t * key, uint8_t * block) {
         int k = 0;
         for (k=0;k<8;k++) {
             points[k] ^= scale;
-        }       
-                    
-        
-        circular_left(key, KEYSIZE, 2);
+        }
     
         //Bezier to find x coordinates
         
@@ -292,11 +290,14 @@ void encode_block(uint8_t * key, uint8_t * block) {
                         points[3],
                         points[5],
                         points[7],
-                        frac*c );
-                        
-        block[c] ^= Noise3D(x, y, (MAXIMUM_VAL*c)/8 ); //Find the noise value
+                        frac*c);
+        
+        VSIZE contrib = Noise3D(x, y, (MAXIMUM_VAL*c)/8 ); //Find the noise value        
+        block[c] ^= contrib;
     }
+
 }
+
 
 uint64_t tests[] = {
     0,
@@ -346,17 +347,17 @@ int main() {
     uint64_t key = 0;
     uint8_t * key_ptr = (uint8_t *)(void *)&key;
     
-    uint64_t block = 0;
+    uint64_t block = 1;
     uint8_t * block_ptr = (uint8_t *)(void *)&block;
     
-    uint64_t total = 0;
+    int total = 0;
     
     for (i=0;i<64;i++) {
         //Key was mutated by encoding, get it back, since we only want to varry the block
         key = 0;
         key_ptr = (uint8_t *)(void *)&key;
         
-        block ^= 1<<i;
+        block = (block<<1 | block);
         
         uint64_t res = block;
         uint8_t * res_ptr = (uint8_t *)(void *)&res;
@@ -365,19 +366,19 @@ int main() {
         
         uint64_t diff = block ^ res;
         
-        uint64_t j = 0;
-        uint64_t count = 0;
+        int j = 0;
+        int count = 0;
         for (j=0;j<64;j++) {
             if (diff&(1<<j))
                 count++;
         }
         
-        printf("%016lX -> %016lX differs in %ld bits\n", block, res, count);
-    
+        printf("%d: %016lX -> %016lX differs in %d bits\n", i, block, res, count);
         total += count;
+        
     }
 
-    printf("%ld bits differ on average.\n", total/64);
+    printf("%d bits differ on average.\n", total/(i+1));
     
     return 0;
 }
